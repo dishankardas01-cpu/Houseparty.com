@@ -1,0 +1,138 @@
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import { db } from "../firebase";
+
+// ---- Parties (host flow) ----------------------------------------------
+
+export async function createParty(hostId, { exactAddress, addressNotes, ...partyData }) {
+  const partyRef = doc(collection(db, "parties"));
+  await setDoc(partyRef, {
+    ...partyData,
+    hostId,
+    status: "active",
+    currentApprovedCount: 0,
+    reminder24Sent: false,
+    reminder2Sent: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await setDoc(doc(db, "parties", partyRef.id, "private", "details"), {
+    exactAddress,
+    addressNotes: addressNotes || "",
+  });
+  return partyRef.id;
+}
+
+export async function updateParty(partyId, data) {
+  await updateDoc(doc(db, "parties", partyId), { ...data, updatedAt: serverTimestamp() });
+}
+
+export async function updatePartyAddress(partyId, { exactAddress, addressNotes }) {
+  await setDoc(doc(db, "parties", partyId, "private", "details"), {
+    exactAddress,
+    addressNotes: addressNotes || "",
+  });
+}
+
+export async function cancelParty(partyId) {
+  await updateDoc(doc(db, "parties", partyId), { status: "cancelled", updatedAt: serverTimestamp() });
+}
+
+export async function getParty(partyId) {
+  const snap = await getDoc(doc(db, "parties", partyId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+// Returns null (instead of throwing) if the caller isn't allowed to see the
+// address yet — Firestore rules deny the read until they're approved.
+export async function getPartyAddress(partyId) {
+  try {
+    const snap = await getDoc(doc(db, "parties", partyId, "private", "details"));
+    return snap.exists() ? snap.data() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function listenActiveParties(cb) {
+  const q = query(collection(db, "parties"), where("status", "==", "active"), orderBy("dateTime", "asc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+export function listenMyHostedParties(uid, cb) {
+  const q = query(collection(db, "parties"), where("hostId", "==", uid), orderBy("dateTime", "desc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+// ---- RSVPs (join flow) --------------------------------------------------
+// Doc ID is always `${partyId}_${guestId}` — see firestore.rules for why.
+
+export async function requestToJoin(partyId, hostId, guestId) {
+  const rsvpId = `${partyId}_${guestId}`;
+  await setDoc(doc(db, "rsvps", rsvpId), {
+    partyId,
+    hostId,
+    guestId,
+    status: "pending",
+    requestedAt: serverTimestamp(),
+    respondedAt: null,
+  });
+  return rsvpId;
+}
+
+export async function approveRequest(rsvpId) {
+  await updateDoc(doc(db, "rsvps", rsvpId), { status: "approved", respondedAt: serverTimestamp() });
+}
+
+export async function declineRequest(rsvpId) {
+  await updateDoc(doc(db, "rsvps", rsvpId), { status: "declined", respondedAt: serverTimestamp() });
+}
+
+export async function cancelMyRsvp(rsvpId) {
+  await updateDoc(doc(db, "rsvps", rsvpId), { status: "cancelled", respondedAt: serverTimestamp() });
+}
+
+export async function getMyRsvpForParty(partyId, guestId) {
+  const snap = await getDoc(doc(db, "rsvps", `${partyId}_${guestId}`));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+// Live status for a single RSVP — used on the party detail page so a guest
+// sees "pending" flip to "approved" the moment the host (or auto-approve)
+// responds, without a page refresh.
+export function listenRsvp(rsvpId, cb) {
+  return onSnapshot(doc(db, "rsvps", rsvpId), (snap) => cb(snap.exists() ? { id: snap.id, ...snap.data() } : null));
+}
+
+export function listenRequestsForParty(partyId, cb) {
+  const q = query(collection(db, "rsvps"), where("partyId", "==", partyId), orderBy("requestedAt", "desc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+export function listenMyRsvps(guestId, cb) {
+  const q = query(collection(db, "rsvps"), where("guestId", "==", guestId), orderBy("requestedAt", "desc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+// ---- Safety: report a user ---------------------------------------------
+
+export async function reportUser({ reporterId, targetUserId, partyId, reason }) {
+  await addDoc(collection(db, "reports"), {
+    reporterId,
+    targetUserId,
+    partyId: partyId || null,
+    reason,
+    createdAt: serverTimestamp(),
+  });
+}
