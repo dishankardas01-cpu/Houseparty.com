@@ -1,0 +1,145 @@
+import { useState } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { useEffect } from "react";
+import { listenMyNotifications, markNotificationRead } from "../lib/notifications";
+
+function timeAgo(ts) {
+  if (!ts?.toDate) return "";
+  const diff = Date.now() - ts.toDate().getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function NotificationBell() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+
+  useEffect(() => {
+    if (!user) return;
+    return listenMyNotifications(user.uid, setNotifs);
+  }, [user]);
+
+  const unread = notifs.filter((n) => !n.read).length;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="relative w-10 h-10 rounded-full flex items-center justify-center hover:bg-raised transition-colors"
+        aria-label="Notifications"
+      >
+        <span aria-hidden>🔔</span>
+        {unread > 0 && (
+          <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-coral animate-pulseglow" />
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-80 card shadow-xl z-50 max-h-96 overflow-y-auto">
+          <div className="px-4 py-3 border-b border-line font-display text-sm">Notifications</div>
+          {notifs.length === 0 && (
+            <p className="px-4 py-6 text-sm text-muted">Nothing yet — you'll see RSVP updates and reminders here.</p>
+          )}
+          {notifs.map((n) => (
+            <button
+              key={n.id}
+              onClick={() => !n.read && markNotificationRead(n.id)}
+              className={`w-full text-left px-4 py-3 border-b border-line last:border-0 hover:bg-raised transition-colors ${
+                n.read ? "opacity-60" : ""
+              }`}
+            >
+              <p className="text-sm font-semibold">{n.title}</p>
+              <p className="text-xs text-muted mt-0.5">{n.body}</p>
+              <p className="text-[11px] text-muted mt-1">{timeAgo(n.createdAt)}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Layout({ children }) {
+  const { user, profile, logOut } = useAuth();
+  const navigate = useNavigate();
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b border-line sticky top-0 bg-bg/90 backdrop-blur z-40">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+          <Link to="/" className="font-display text-xl font-semibold tracking-tight flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-accent shadow-glow" aria-hidden />
+            House Party
+          </Link>
+
+          {user && (
+            <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted">
+              <NavLink to="/" end className={({ isActive }) => (isActive ? "text-ink" : "hover:text-ink")}>
+                Discover
+              </NavLink>
+              <NavLink to="/dashboard/attending" className={({ isActive }) => (isActive ? "text-ink" : "hover:text-ink")}>
+                Attending
+              </NavLink>
+              <NavLink to="/dashboard/hosting" className={({ isActive }) => (isActive ? "text-ink" : "hover:text-ink")}>
+                Hosting
+              </NavLink>
+            </nav>
+          )}
+
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <Link to="/parties/new" className="btn-primary text-sm hidden sm:inline-block">
+                  Host a party
+                </Link>
+                <NotificationBell />
+                <Link to="/profile" className="w-9 h-9 rounded-full bg-raised flex items-center justify-center text-sm font-semibold">
+                  {profile?.displayName?.[0]?.toUpperCase() || "?"}
+                </Link>
+                <button
+                  onClick={async () => {
+                    await logOut();
+                    navigate("/login");
+                  }}
+                  className="text-sm text-muted hover:text-ink hidden sm:inline"
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="text-sm text-muted hover:text-ink">
+                  Log in
+                </Link>
+                <Link to="/signup" className="btn-primary text-sm">
+                  Sign up
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1">{children}</main>
+
+      {user && (
+        <Link
+          to="/parties/new"
+          className="sm:hidden fixed bottom-5 right-5 btn-primary rounded-full w-14 h-14 flex items-center justify-center text-2xl shadow-glow"
+          aria-label="Host a party"
+        >
+          +
+        </Link>
+      )}
+
+      <footer className="border-t border-line py-6 text-center text-xs text-muted">
+        House Party — a coordination tool, not the host or insurer of any event.
+      </footer>
+    </div>
+  );
+}
