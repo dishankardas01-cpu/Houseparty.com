@@ -1,0 +1,11 @@
+import { collection, doc, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
+import { db } from "../firebase";
+
+export function listenMyNotifications(uid, cb) {
+  const q = query(collection(db, "notifications"), where("userId", "==", uid), orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+export async function markNotificationRead(id) {
+  await updateDoc(doc(db, "notifications", id), { read: true });
+}
