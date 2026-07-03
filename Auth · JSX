@@ -1,0 +1,137 @@
+import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const RECAPTCHA_ID = "recaptcha-container";
+
+export default function Auth({ mode }) {
+  const { sendOtp, confirmOtp } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || "/";
+
+  const [step, setStep] = useState("phone"); // "phone" | "code"
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [confirmation, setConfirmation] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const heading = mode === "signup" ? "Create your account" : "Log in";
+
+  function normalizePhone(raw) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("+")) return trimmed.replace(/[^\d+]/g, "");
+    // Best-effort: assume the user typed a national number and forgot the
+    // country code. They can always retype with a leading + if this is wrong.
+    return `+${trimmed.replace(/\D/g, "")}`;
+  }
+
+  async function handleSendCode(e) {
+    e.preventDefault();
+    setError("");
+    const e164 = normalizePhone(phone);
+    if (e164.length < 8) {
+      setError("Enter your full phone number, including country code (e.g. +1 555 123 4567).");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await sendOtp(e164, RECAPTCHA_ID);
+      setConfirmation(result);
+      setStep("code");
+    } catch (err) {
+      setError(err.message.replace("Firebase: ", ""));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleVerify(e) {
+    e.preventDefault();
+    setError("");
+    if (code.trim().length < 6) {
+      setError("Enter the 6-digit code we sent.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await confirmOtp(confirmation, code.trim());
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError("That code didn't match — check it and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="max-w-md mx-auto px-4 py-16">
+      <h1 className="font-display text-3xl font-semibold mb-2">{heading}</h1>
+      <p className="text-muted text-sm mb-8">
+        We verify every account with a phone number — it's the first line of defense for a
+        product where people show up at each other's homes.
+      </p>
+
+      {step === "phone" && (
+        <form onSubmit={handleSendCode} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5" htmlFor="phone">
+              Phone number
+            </label>
+            <input
+              id="phone"
+              className="input"
+              type="tel"
+              placeholder="+1 555 123 4567"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              autoFocus
+            />
+          </div>
+          {error && <p className="text-sm text-coral">{error}</p>}
+          <button type="submit" className="btn-primary w-full" disabled={busy}>
+            {busy ? "Sending code…" : "Send verification code"}
+          </button>
+          <div id={RECAPTCHA_ID} />
+        </form>
+      )}
+
+      {step === "code" && (
+        <form onSubmit={handleVerify} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5" htmlFor="code">
+              6-digit code
+            </label>
+            <input
+              id="code"
+              className="input tracking-[0.3em] text-lg"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="••••••"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoFocus
+            />
+            <p className="text-xs text-muted mt-2">Sent to {phone}.</p>
+          </div>
+          {error && <p className="text-sm text-coral">{error}</p>}
+          <button type="submit" className="btn-primary w-full" disabled={busy}>
+            {busy ? "Verifying…" : "Verify and continue"}
+          </button>
+          <button
+            type="button"
+            className="text-sm text-muted hover:text-ink w-full text-center"
+            onClick={() => {
+              setStep("phone");
+              setCode("");
+              setError("");
+            }}
+          >
+            Use a different number
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
